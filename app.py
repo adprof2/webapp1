@@ -32,19 +32,13 @@ def validate_telegram_webapp(init_data):
                 key, value = item.split('=', 1)
                 data_dict[key] = value
         
-        # Check if user data exists
+        # For now, we'll simplify and just check if user data exists
         if 'user' not in data_dict:
             return False, None
         
         # Get user data
         try:
             user_data = json.loads(urllib.parse.unquote(data_dict['user']))
-            
-            # Validate that user_id exists in the user data
-            if 'id' not in user_data:
-                print("User data missing required 'id' field")
-                return False, None
-                
             return True, user_data
         except Exception as e:
             print(f"Error parsing user data: {e}")
@@ -54,112 +48,70 @@ def validate_telegram_webapp(init_data):
         print(f"Error validating Telegram WebApp data: {e}")
         return False, None
 
-# Import TestStorage from the main bot
-import sys
-import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from storage import TestStorage
-
-# Initialize the same test storage as the main bot
-test_storage = TestStorage()
-
-# Function to sync user_tests.json files
-def sync_user_tests_files():
-    try:
-        # Force the test storage to save its current state
-        test_storage._save_tests()
-        
-        main_file_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'user_tests.json')
-        webapp_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'user_tests.json')
-        
-        # Check if the main file exists
-        if os.path.exists(main_file_path):
-            # Read the main file
-            with open(main_file_path, 'r', encoding='utf-8') as f:
-                tests_data = json.load(f)
-            
-            # Write to the webapp file
-            with open(webapp_file_path, 'w', encoding='utf-8') as f:
-                json.dump(tests_data, f, ensure_ascii=False, indent=4)
-            
-            print(f"Successfully synced user_tests.json files")
-            return True
-        else:
-            print(f"Main user_tests.json file not found at {main_file_path}")
-            return False
-    except Exception as e:
-        print(f"Error syncing user_tests.json files: {e}")
-        return False
-
 # Function to get tests for a user
 def get_user_tests(user_id):
-    # First, ensure we have the latest tests
-    sync_user_tests_files()
+    # Convert user_id to string if it's not already
+    user_id_str = str(user_id)
+    print(f"Getting tests for user: {user_id_str}")
     
-    # Convert user_id to integer if it's not already
-    try:
-        user_id_int = int(user_id)
-    except (ValueError, TypeError):
-        print(f"Invalid user_id: {user_id}, cannot convert to integer")
-        return []
+    # Try multiple locations for the user_tests.json file
+    possible_paths = [
+        # First check in the current directory (this is the copy we just made)
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), 'user_tests.json'),
+        # Path relative to the current directory
+        'user_tests.json',
+        # Path relative to the parent directory
+        '../user_tests.json',
+        # Absolute path based on current file location
+        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'user_tests.json'),
+        # Railway deployment path
+        '/app/user_tests.json'
+    ]
     
-    print(f"Getting tests for user: {user_id_int}")
-    
-    # Use the TestStorage directly to get the user's tests
-    try:
-        # Get tests directly from the test_storage object
-        user_tests = test_storage.get_user_tests(user_id_int)
-        print(f"Found {len(user_tests)} tests for user {user_id_int} using TestStorage")
-        
-        # Add an ID to each test if it doesn't have one
-        for i, test in enumerate(user_tests):
-            if 'id' not in test:
-                test['id'] = f"test_{i+1}"
-            # Add owner ID to each test to ensure ownership is clear
-            test['owner_id'] = str(user_id_int)
-            
-            # Make sure each question has a correct_option field
-            if 'questions' in test:
-                for q_idx, question in enumerate(test['questions']):
-                    # If the question doesn't have a correct_option, assume the first option is correct
-                    if 'correct_option' not in question and 'options' in question and len(question['options']) > 0:
-                        question['correct_option'] = 0
-        
-        return user_tests
-    except Exception as e:
-        print(f"Error getting tests from TestStorage: {e}")
-        
-        # Fallback to the JSON file method if TestStorage fails
+    # Try each path until we find the file
+    for path in possible_paths:
         try:
-            # Try to read from the main user_tests.json file
-            main_file_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'user_tests.json')
-            with open(main_file_path, 'r', encoding='utf-8') as f:
+            print(f"Trying to load user_tests.json from: {path}")
+            with open(path, 'r', encoding='utf-8') as f:
                 tests_data = json.load(f)
                 
-                user_id_str = str(user_id_int)
+                # Check if user_id_str exists in the tests_data
                 if user_id_str in tests_data:
                     user_tests = tests_data.get(user_id_str, [])
-                    print(f"Found {len(user_tests)} tests for user {user_id_str} in JSON file")
+                    print(f"Found {len(user_tests)} tests for user {user_id_str} at {path}")
                     
-                    # Process tests as before
+                    # Add an ID to each test if it doesn't have one
                     for i, test in enumerate(user_tests):
                         if 'id' not in test:
                             test['id'] = f"test_{i+1}"
-                        test['owner_id'] = user_id_str
-                        
-                        if 'questions' in test:
-                            for q_idx, question in enumerate(test['questions']):
-                                if 'correct_option' not in question and 'options' in question and len(question['options']) > 0:
-                                    question['correct_option'] = 0
                     
                     return user_tests
                 else:
-                    print(f"User ID {user_id_str} not found in JSON file")
+                    print(f"User ID {user_id_str} not found in {path}")
         except Exception as e:
-            print(f"Error reading from JSON file: {e}")
+            print(f"Failed to load from {path}: {e}")
     
-    # If all methods fail, return an empty list
-    print(f"No tests found for user {user_id} using any method")
+    # If all paths fail, fall back to sample tests
+    try:
+        sample_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'sample_tests.json')
+        print(f"Falling back to sample tests from: {sample_path}")
+        with open(sample_path, 'r', encoding='utf-8') as f:
+            sample_data = json.load(f)
+            sample_tests = sample_data.get(user_id_str, [])
+            if not sample_tests and '1477944238' in sample_data:
+                sample_tests = sample_data['1477944238']
+            
+            # Add an ID to each test if it doesn't have one
+            for i, test in enumerate(sample_tests):
+                if 'id' not in test:
+                    test['id'] = f"sample_test_{i+1}"
+            
+            print(f"Loaded {len(sample_tests)} sample tests")
+            return sample_tests
+    except Exception as e:
+        print(f"Failed to load sample tests: {e}")
+        return []   # If everything fails, return an empty list
+    print("All attempts to load tests failed, returning empty list")
     return []
 
 # Main route for the web app
@@ -213,35 +165,19 @@ def validate_user():
             'message': f'Error processing request: {str(e)}'
         }), 500
 
-# API endpoint to force sync of test files
-@app.route('/api/sync', methods=['GET'])
-def sync_tests():
-    try:
-        success = sync_user_tests_files()
-        return jsonify({
-            'success': success,
-            'message': 'Tests synced successfully' if success else 'Failed to sync tests'
-        })
-    except Exception as e:
-        print(f"Error in sync_tests: {e}")
-        return jsonify({
-            'success': False,
-            'message': f'Error syncing tests: {str(e)}'
-        }), 500
-
 # API endpoint to get tests for the authenticated user
 @app.route('/api/tests', methods=['GET'])
 def get_tests():
     try:
-        # Always sync tests first
-        sync_user_tests_files()
-        
-        # Get user_id from session
+        # Get user_id from session or query parameter
         user_id = session.get('user_id')
         
-        # Strict authentication check - only allow session-based authentication
+        # For debugging, also accept a user_id query parameter
+        if not user_id and request.args.get('user_id'):
+            user_id = request.args.get('user_id')
+        
         if not user_id:
-            print("No user_id found in session")
+            print("No user_id found in session or query parameters")
             return jsonify({
                 'success': False,
                 'message': 'User not authenticated'
@@ -264,7 +200,6 @@ def get_tests():
 # API endpoint to get a specific test
 @app.route('/api/tests/<test_id>', methods=['GET'])
 def get_test(test_id):
-    # Get user_id from session - strict authentication check
     user_id = session.get('user_id')
     if not user_id:
         return jsonify({
@@ -272,67 +207,40 @@ def get_test(test_id):
             'message': 'User not authenticated'
         }), 401
     
-    try:
-        # Convert user_id to integer
-        user_id_int = int(user_id)
-        
-        # Try to get the test by index first (for compatibility with older code)
-        try:
-            test_index = int(test_id)
-            test = test_storage.get_test(user_id_int, test_index)
-            if test:
-                # Add ID if it doesn't exist
-                if 'id' not in test:
-                    test['id'] = f"test_{test_index}"
-                # Add owner ID
-                test['owner_id'] = str(user_id_int)
-                
-                # Make sure each question has a correct_option field
-                if 'questions' in test:
-                    for q_idx, question in enumerate(test['questions']):
-                        if 'correct_option' not in question and 'options' in question and len(question['options']) > 0:
-                            question['correct_option'] = 0
-                
-                return jsonify({
-                    'success': True,
-                    'test': test
-                })
-        except (ValueError, TypeError):
-            # If test_id is not an integer, fall back to searching by ID
-            pass
-        
-        # Fall back to searching through all tests
-        tests = get_user_tests(user_id)
-        
-        # Find the test with the matching ID
-        test = None
-        for t in tests:
-            if str(t.get('id', '')) == str(test_id):
-                test = t
-                break
-        
-        if not test:
-            return jsonify({
-                'success': False,
-                'message': 'Test not found'
-            }), 404
-        
-        return jsonify({
-            'success': True,
-            'test': test
-        })
-    except Exception as e:
-        print(f"Error getting test {test_id} for user {user_id}: {e}")
+    tests = get_user_tests(user_id)
+    
+    # Find the test with the matching ID
+    test = None
+    for t in tests:
+        if str(t.get('id', '')) == str(test_id):
+            test = t
+            break
+    
+    if not test:
         return jsonify({
             'success': False,
-            'message': f'Error getting test: {str(e)}'
-        }), 500
+            'message': 'Test not found'
+        }), 404
+    
+    return jsonify({
+        'success': True,
+        'test': test
+    })
 
 # API endpoint to submit test answers
 @app.route('/api/submit_test', methods=['POST'])
 def submit_test():
-    # Get user_id from session - strict authentication check
+    # Try to get user_id from session first
     user_id = session.get('user_id')
+    
+    # If not in session, try to get from query parameters or request body
+    if not user_id:
+        user_id = request.args.get('user_id') or (request.json and request.json.get('user_id'))
+        
+        # If we found a user_id, store it in the session for future requests
+        if user_id:
+            session['user_id'] = user_id
+            print(f"Using user_id from request: {user_id}")
     
     if not user_id:
         return jsonify({
@@ -357,14 +265,6 @@ def submit_test():
             'success': False,
             'message': 'Test not found'
         }), 404
-        
-    # Verify test ownership
-    if 'owner_id' in test and str(test['owner_id']) != str(user_id):
-        print(f"Ownership mismatch: Test owner {test['owner_id']} != User {user_id}")
-        return jsonify({
-            'success': False,
-            'message': 'Access denied: You do not own this test'
-        }), 403
     
     # Get the client-side score calculation if available
     client_correct = data.get('correct')
@@ -385,21 +285,7 @@ def submit_test():
         if i < len(answers):
             try:
                 user_answer = int(answers[i]) if answers[i] is not None else None
-                
-                # Handle the correct_option field - it might be missing or in different formats
-                correct_answer = None
-                if 'correct_option' in question:
-                    # Try to convert to int
-                    try:
-                        correct_answer = int(question.get('correct_option'))
-                    except (ValueError, TypeError):
-                        # If conversion fails, assume the first option (index 0) is correct
-                        correct_answer = 0
-                        print(f"Warning: Invalid correct_option for question {i+1}, assuming first option is correct")
-                else:
-                    # If correct_option is missing, assume the first option (index 0) is correct
-                    correct_answer = 0
-                    print(f"Warning: Missing correct_option for question {i+1}, assuming first option is correct")
+                correct_answer = int(question.get('correct_option')) if question.get('correct_option') is not None else None
                 
                 print(f"Question {i+1}: User answered {user_answer}, correct is {correct_answer}")
                 
@@ -484,8 +370,7 @@ def submit_test():
         'saved_to_database': True
     })
 
-# This block will only run if app.py is executed directly, not when imported
 if __name__ == "__main__":
-    # Get port from environment variable (Render.com sets this)
+    # Get port from environment variable (Railway sets this)
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port, debug=False)
