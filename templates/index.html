@@ -717,15 +717,57 @@
             };
     </script>
     <script>
+        // Global variables
+        let userId = null;
+        let userData = null;
+        let tg = null;
+        
         // Check if we're in a Telegram WebApp environment
-        if (!window.Telegram || !window.Telegram.WebApp) {
-            // Not running in Telegram WebApp - show message and hide app
-            document.getElementById('direct-access-message').style.display = 'block';
-            document.getElementById('loading').style.display = 'none';
-            document.getElementById('app').style.display = 'none';
-            // Exit early - don't execute the rest of the script
-            throw new Error('This app can only be accessed through Telegram');
+        function checkTelegramWebApp() {
+            if (window.Telegram && window.Telegram.WebApp) {
+                tg = window.Telegram.WebApp;
+                
+                // Expand the web app to full view
+                tg.expand();
+                
+                // Get user data from Telegram
+                if (tg.initDataUnsafe && tg.initDataUnsafe.user) {
+                    userData = tg.initDataUnsafe.user;
+                    userId = userData.id;
+                    console.log('User authenticated:', userData);
+                    return true;
+                } else if (tg.initData) {
+                    // If we have initData but not parsed, we need to validate it on the server
+                    console.log('Has initData, needs validation');
+                    return true;
+                }
+            }
+            return false;
         }
+        
+        // Initialize the app
+        function initApp() {
+            if (!checkTelegramWebApp()) {
+                // Not running in Telegram WebApp - show message and hide app
+                document.getElementById('direct-access-message').style.display = 'block';
+                document.getElementById('app').style.display = 'none';
+                return;
+            }
+            
+            // Initialize the app
+            initializeLanguage();
+            initializeTheme();
+            setupEventListeners();
+            loadTests();
+            
+            // If we have user data, update the UI
+            if (userData) {
+                updateUILanguage();
+            }
+        }
+        
+        // Run the initialization when the document is loaded
+        document.addEventListener('DOMContentLoaded', initApp);
         
         // DOM elements
         const app = document.getElementById('app');
@@ -860,83 +902,100 @@
         async function initApp() {
             try {
                 console.log('Initializing app...');
-                console.log('Telegram WebApp available:', !!window.Telegram?.WebApp);
                 
+                // Check if we're in a Telegram WebApp
                 if (!window.Telegram || !window.Telegram.WebApp) {
-                    throw new Error('Telegram WebApp is not available');
+                    throw new Error('This app can only be used within Telegram');
                 }
+                
+                const tg = window.Telegram.WebApp;
+                
+                // Expand the WebApp to full view
+                tg.expand();
                 
                 // Initialize theme and language
                 initializeTheme();
                 initializeLanguage();
                 
-                // Get the user from Telegram WebApp
-                const tg = window.Telegram.WebApp;
-                tg.expand();
-                
-                // Try to get user from Telegram WebApp
+                // Get user data from Telegram WebApp
                 if (tg.initDataUnsafe && tg.initDataUnsafe.user) {
-                    currentUser = tg.initDataUnsafe.user;
-                    console.log('Got user from Telegram WebApp:', currentUser);
+                    // We have user data directly from Telegram
+                    userData = tg.initDataUnsafe.user;
+                    userId = userData.id;
+                    console.log('Got user from Telegram WebApp:', userData);
+                } else if (tg.initData) {
+                    // We have initData that needs to be validated
+                    console.log('Validating initData with server...');
+                    const validateResp = await fetch('/api/validate', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: `initData=${encodeURIComponent(tg.initData)}`
+                    });
+                    
+                    if (!validateResp.ok) {
+                        throw new Error(`Validation failed: ${validateResp.statusText}`);
+                    }
+                    
+                    const validateData = await validateResp.json();
+                    
+                    if (!validateData.success || !validateData.user || !validateData.user.id) {
+                        throw new Error(validateData.message || 'Failed to validate user');
+                    }
+                    
+                    userData = validateData.user;
+                    userId = userData.id;
+                    console.log('User validated:', userData);
                 } else {
-                    // Fallback to default user if Telegram doesn't provide user data
-                    currentUser = { id: 1477944238, username: 'default_user', first_name: 'Default' };
-                    console.warn('Using default user:', currentUser);
+                    // No user data available
+                    throw new Error('No user data available. Please open the app from Telegram.');
                 }
-
-                // --- SESSION AUTHENTICATION FIX ---
-                let initData = tg.initData || '';
-                if (!initData) {
-                    const urlParams = new URLSearchParams(window.location.search);
-                    initData = urlParams.get('initData') || '';
-                }
-                if (!initData) {
-                    throw new Error('No Telegram initData provided. This app must be opened from Telegram.');
-                }
-                const validateResp = await fetch('/api/validate', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                    body: `initData=${encodeURIComponent(initData)}`
-                });
-                const validateData = await validateResp.json();
-                if (!validateData.success || !validateData.user || !validateData.user.id) {
-                    throw new Error(validateData.message || 'Failed to validate user.');
-                }
-                currentUser = validateData.user;
-                // --- END SESSION AUTHENTICATION FIX ---
-
-                // Defensive: check currentUser
-                if (!currentUser || !currentUser.id) {
-                    throw new Error('User authentication failed. Please open the app from Telegram.');
-                }
-
+                
+                // Update UI with user data
+                updateUILanguage();
+                
+                // Load tests for the user
                 await loadTests();
+                
+                // Show the app
                 document.getElementById('loading').style.display = 'none';
                 document.getElementById('app').style.display = 'block';
-                showScreen(homeScreen);
+                showScreen('home');
+                
             } catch (error) {
                 console.error('Initialization error:', error);
-                alert('Failed to initialize the app: ' + error.message);
                 document.getElementById('loading').style.display = 'none';
                 document.getElementById('direct-access-message').style.display = 'block';
+                
+                // Show error message to the user
+                const errorMessage = document.getElementById('direct-access-message-text');
+                if (errorMessage) {
+                    errorMessage.textContent = `Error: ${error.message}. Please try again or contact support.`;
+                }
             }
         }
 
         // Load user's tests
         async function loadTests() {
             try {
-                if (!currentUser || !currentUser.id) {
-                    console.error('No authenticated user found');
-                    showScreen('login-screen');
+                // Make sure we have a user ID
+                if (!userId) {
+                    console.error('No user ID available');
+                    showScreen('home');
                     return;
                 }
                 
-                console.log('Loading tests for user:', currentUser.id);
+                console.log('Loading tests for user:', userId);
                 
                 // First, force a sync with the main bot's tests
                 console.log('Syncing tests with main bot...');
                 try {
-                    const syncResponse = await fetch('/api/sync');
+                    const syncResponse = await fetch('/api/sync', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ user_id: userId })
+                    });
                     const syncData = await syncResponse.json();
                     console.log('Sync response:', syncData);
                 } catch (syncError) {
@@ -944,17 +1003,25 @@
                     // Continue even if sync fails
                 }
                 
-                // Only use the session-based authentication
-                // No query parameters for security reasons
+                // Fetch tests for the authenticated user
                 const url = '/api/tests';
                 console.log('Fetching tests from:', url);
                 
-                const response = await fetch(url);
+                const response = await fetch(url, {
+                    headers: {
+                        'Authorization': `Bearer ${userId}`
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
                 const data = await response.json();
                 console.log('Tests API response:', data);
                 
-                if (!data.success) {
-                    throw new Error(data.message || 'Failed to load tests');
+                if (!data || !Array.isArray(data.tests)) {
+                    throw new Error('Invalid response format from server');
                 }
                 
                 tests = data.tests || [];
