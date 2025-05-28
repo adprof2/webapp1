@@ -909,45 +909,127 @@
                 }
                 
                 const tg = window.Telegram.WebApp;
+                console.log('Telegram WebApp version:', tg.version);
                 
                 // Expand the WebApp to full view
                 tg.expand();
+                
+                // Set main button to be hidden initially
+                tg.MainButton.hide();
                 
                 // Initialize theme and language
                 initializeTheme();
                 initializeLanguage();
                 
-                // Get user data from Telegram WebApp
-                if (tg.initDataUnsafe && tg.initDataUnsafe.user) {
-                    // We have user data directly from Telegram
-                    userData = tg.initDataUnsafe.user;
-                    userId = userData.id;
-                    console.log('Got user from Telegram WebApp:', userData);
-                } else if (tg.initData) {
-                    // We have initData that needs to be validated
-                    console.log('Validating initData with server...');
-                    const validateResp = await fetch('/api/validate', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                        body: `initData=${encodeURIComponent(tg.initData)}`
-                    });
-                    
-                    if (!validateResp.ok) {
-                        throw new Error(`Validation failed: ${validateResp.statusText}`);
-                    }
-                    
-                    const validateData = await validateResp.json();
-                    
-                    if (!validateData.success || !validateData.user || !validateData.user.id) {
-                        throw new Error(validateData.message || 'Failed to validate user');
-                    }
-                    
-                    userData = validateData.user;
-                    userId = userData.id;
-                    console.log('User validated:', userData);
+                // Initialize Telegram theme
+                if (tg.colorScheme === 'dark') {
+                    applyTheme('dark');
                 } else {
-                    // No user data available
-                    throw new Error('No user data available. Please open the app from Telegram.');
+                    applyTheme('light');
+                }
+                
+                // Debug: Log all Telegram WebApp data
+                console.log('Telegram WebApp initDataUnsafe:', tg.initDataUnsafe);
+                console.log('Telegram WebApp initData available:', !!tg.initData);
+                if (tg.initData) {
+                    console.log('Telegram WebApp initData length:', tg.initData.length);
+                }
+                
+                // For debugging: Add a direct test user ID if needed
+                if (!tg.initDataUnsafe?.user?.id && !tg.initData) {
+                    console.warn('No user data from Telegram, using test user ID for development');
+                    // This is for development only and should be removed in production
+                    userData = { id: 123456789, first_name: 'Test', username: 'test_user' };
+                    userId = userData.id;
+                } else {
+                    // Get user data from Telegram WebApp
+                    if (tg.initDataUnsafe && tg.initDataUnsafe.user) {
+                        // We have user data directly from Telegram
+                        userData = tg.initDataUnsafe.user;
+                        userId = userData.id;
+                        console.log('Got user from Telegram WebApp:', userData);
+                        
+                        // Store the user ID in localStorage for persistence
+                        try {
+                            localStorage.setItem('telegram_user_id', userId);
+                            localStorage.setItem('telegram_user_data', JSON.stringify(userData));
+                        } catch (e) {
+                            console.warn('Failed to store user data in localStorage:', e);
+                        }
+                    } else if (tg.initData) {
+                        // We have initData that needs to be validated
+                        console.log('Validating initData with server...');
+                        
+                        // First try to get user from localStorage while validating
+                        try {
+                            const storedUserId = localStorage.getItem('telegram_user_id');
+                            const storedUserData = localStorage.getItem('telegram_user_data');
+                            if (storedUserId && storedUserData) {
+                                userId = storedUserId;
+                                userData = JSON.parse(storedUserData);
+                                console.log('Using cached user data while validating:', userData);
+                            }
+                        } catch (e) {
+                            console.warn('Failed to retrieve user data from localStorage:', e);
+                        }
+                        
+                        // Validate with server
+                        try {
+                            const validateResp = await fetch('/api/validate', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                                body: `initData=${encodeURIComponent(tg.initData)}`
+                            });
+                            
+                            if (validateResp.ok) {
+                                const validateData = await validateResp.json();
+                                
+                                if (validateData.success && validateData.user && validateData.user.id) {
+                                    userData = validateData.user;
+                                    userId = userData.id;
+                                    console.log('User validated successfully:', userData);
+                                    
+                                    // Store the validated user data
+                                    try {
+                                        localStorage.setItem('telegram_user_id', userId);
+                                        localStorage.setItem('telegram_user_data', JSON.stringify(userData));
+                                    } catch (e) {
+                                        console.warn('Failed to store validated user data:', e);
+                                    }
+                                } else {
+                                    console.error('Validation response did not contain valid user data:', validateData);
+                                    if (!userId) {
+                                        throw new Error(validateData.message || 'Failed to validate user');
+                                    }
+                                }
+                            } else {
+                                console.error('Validation request failed:', validateResp.status, validateResp.statusText);
+                                if (!userId) {
+                                    throw new Error(`Validation failed: ${validateResp.statusText}`);
+                                }
+                            }
+                        } catch (validationError) {
+                            console.error('Error during validation:', validationError);
+                            if (!userId) {
+                                throw validationError;
+                            }
+                        }
+                    } else {
+                        // Try to get user from localStorage as last resort
+                        try {
+                            const storedUserId = localStorage.getItem('telegram_user_id');
+                            const storedUserData = localStorage.getItem('telegram_user_data');
+                            if (storedUserId && storedUserData) {
+                                userId = storedUserId;
+                                userData = JSON.parse(storedUserData);
+                                console.log('Using cached user data:', userData);
+                            } else {
+                                throw new Error('No user data available. Please open the app from Telegram.');
+                            }
+                        } catch (e) {
+                            throw new Error('No user data available. Please open the app from Telegram.');
+                        }
+                    }
                 }
                 
                 // Update UI with user data
@@ -986,41 +1068,88 @@
                 
                 console.log('Loading tests for user:', userId);
                 
-                // First, force a sync with the main bot's tests
+                // First, force a sync with the main bot's tests to ensure we have fresh data
                 console.log('Syncing tests with main bot...');
                 try {
+                    // Get the initData from Telegram WebApp if available
+                    const tg = window.Telegram.WebApp;
+                    const initData = tg?.initData;
+                    
                     const syncResponse = await fetch('/api/sync', {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${userId}`
                         },
-                        body: JSON.stringify({ user_id: userId })
+                        body: JSON.stringify({ 
+                            user_id: userId,
+                            init_data: initData
+                        })
                     });
-                    const syncData = await syncResponse.json();
-                    console.log('Sync response:', syncData);
+                    
+                    if (syncResponse.ok) {
+                        const syncData = await syncResponse.json();
+                        console.log('Sync successful:', syncData);
+                    } else {
+                        console.warn('Sync returned status:', syncResponse.status);
+                    }
                 } catch (syncError) {
                     console.error('Error syncing tests:', syncError);
                     // Continue even if sync fails
                 }
                 
                 // Fetch tests for the authenticated user
-                const url = '/api/tests';
-                console.log('Fetching tests from:', url);
+                console.log('Fetching tests from server...');
                 
-                const response = await fetch(url, {
-                    headers: {
-                        'Authorization': `Bearer ${userId}`
-                    }
-                });
+                // Prepare request details with multiple authentication methods
+                const tg = window.Telegram.WebApp;
+                const headers = {
+                    'Authorization': `Bearer ${userId}`,
+                    'Content-Type': 'application/json'
+                };
+                
+                // Construct URL with query parameters if needed
+                let url = '/api/tests';
+                if (tg?.initData) {
+                    url += `?initData=${encodeURIComponent(tg.initData)}`;
+                }
+                
+                const response = await fetch(url, { headers });
                 
                 if (!response.ok) {
+                    if (response.status === 401) {
+                        // If unauthorized, try to revalidate through the /api/validate endpoint
+                        console.log('Attempting to revalidate user...');
+                        if (tg?.initData) {
+                            const validateResp = await fetch('/api/validate', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                                body: `initData=${encodeURIComponent(tg.initData)}`
+                            });
+                            
+                            if (validateResp.ok) {
+                                const validateData = await validateResp.json();
+                                if (validateData.success && validateData.user && validateData.user.id) {
+                                    // Update userId and retry loading tests
+                                    userId = validateData.user.id;
+                                    userData = validateData.user;
+                                    console.log('Revalidation successful, retrying test load...');
+                                    return loadTests(); // Retry
+                                }
+                            }
+                        }
+                    }
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
                 
                 const data = await response.json();
                 console.log('Tests API response:', data);
                 
-                if (!data || !Array.isArray(data.tests)) {
+                if (!data.success) {
+                    throw new Error(data.message || 'Server returned an error');
+                }
+                
+                if (!Array.isArray(data.tests)) {
                     throw new Error('Invalid response format from server');
                 }
                 
@@ -1076,7 +1205,13 @@
                 renderTestsList();
             } catch (error) {
                 console.error('Error loading tests:', error);
-                alert('Failed to load tests: ' + error.message);
+                // More user-friendly error message
+                document.getElementById('tests-list').innerHTML = `
+                    <div class="alert alert-danger">
+                        <strong>Error loading tests:</strong> ${error.message}
+                        <p>Please try refreshing the page or restarting the app.</p>
+                    </div>
+                `;
             }
         }
 

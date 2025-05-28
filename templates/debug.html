@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Telegram WebApp Debug</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            padding: 20px;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        pre {
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            max-height: 300px;
+            overflow: auto;
+        }
+        .debug-section {
+            margin-bottom: 30px;
+            border: 1px solid #dee2e6;
+            border-radius: 5px;
+            padding: 15px;
+        }
+        .debug-header {
+            font-weight: bold;
+            margin-bottom: 10px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #dee2e6;
+        }
+        .action-buttons {
+            margin-top: 20px;
+            display: flex;
+            gap: 10px;
+        }
+        #status-message {
+            margin-top: 20px;
+            padding: 10px;
+            border-radius: 5px;
+            display: none;
+        }
+        .test-button {
+            margin-top: 5px;
+            margin-bottom: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Telegram WebApp Debugger</h1>
+        <p>This page helps diagnose issues with Telegram WebApp authentication.</p>
+        
+        <div class="debug-section">
+            <div class="debug-header">WebApp Information</div>
+            <div id="webapp-info">Loading...</div>
+        </div>
+        
+        <div class="debug-section">
+            <div class="debug-header">User Information</div>
+            <div id="user-info">Loading...</div>
+        </div>
+        
+        <div class="debug-section">
+            <div class="debug-header">initData Information</div>
+            <div id="initdata-info">Loading...</div>
+        </div>
+        
+        <div class="debug-section">
+            <div class="debug-header">Test Authentication</div>
+            <button id="test-validate" class="btn btn-primary test-button">Test /api/validate</button>
+            <button id="test-tests" class="btn btn-primary test-button">Test /api/tests</button>
+            <button id="test-sync" class="btn btn-primary test-button">Test /api/sync</button>
+            <div id="auth-results"></div>
+        </div>
+        
+        <div class="debug-section">
+            <div class="debug-header">Manual User ID</div>
+            <div class="input-group mb-3">
+                <input type="text" id="manual-user-id" class="form-control" placeholder="Enter user ID (e.g. 123456789)">
+                <button class="btn btn-outline-secondary" type="button" id="set-user-id">Set User ID</button>
+            </div>
+            <p class="text-muted">Use this for testing without valid Telegram auth data</p>
+        </div>
+        
+        <div id="status-message"></div>
+        
+        <div class="action-buttons">
+            <a href="/" class="btn btn-secondary">Back to Main App</a>
+            <button id="clear-storage" class="btn btn-danger">Clear Local Storage</button>
+            <button id="refresh-data" class="btn btn-primary">Refresh Data</button>
+        </div>
+    </div>
+    
+    <script>
+        // Display WebApp information
+        function displayWebAppInfo() {
+            const webappInfoDiv = document.getElementById('webapp-info');
+            const tg = window.Telegram?.WebApp;
+            
+            if (tg) {
+                webappInfoDiv.innerHTML = `
+                    <p><strong>Available:</strong> Yes</p>
+                    <p><strong>Version:</strong> ${tg.version}</p>
+                    <p><strong>Platform:</strong> ${tg.platform}</p>
+                    <p><strong>Color Scheme:</strong> ${tg.colorScheme}</p>
+                    <p><strong>Theme Params:</strong> <pre>${JSON.stringify(tg.themeParams, null, 2)}</pre></p>
+                `;
+            } else {
+                webappInfoDiv.innerHTML = `
+                    <div class="alert alert-warning">
+                        Telegram WebApp is not available. This page should be opened from within the Telegram app.
+                    </div>
+                `;
+            }
+        }
+        
+        // Display user information
+        function displayUserInfo() {
+            const userInfoDiv = document.getElementById('user-info');
+            const tg = window.Telegram?.WebApp;
+            
+            if (tg && tg.initDataUnsafe && tg.initDataUnsafe.user) {
+                const user = tg.initDataUnsafe.user;
+                userInfoDiv.innerHTML = `
+                    <p><strong>User ID:</strong> ${user.id}</p>
+                    <p><strong>First Name:</strong> ${user.first_name}</p>
+                    <p><strong>Last Name:</strong> ${user.last_name || 'N/A'}</p>
+                    <p><strong>Username:</strong> ${user.username || 'N/A'}</p>
+                    <p><strong>Language Code:</strong> ${user.language_code || 'N/A'}</p>
+                    <pre>${JSON.stringify(user, null, 2)}</pre>
+                `;
+            } else {
+                userInfoDiv.innerHTML = `
+                    <div class="alert alert-warning">
+                        No user information available. This could be because:
+                        <ul>
+                            <li>The WebApp is not being opened from Telegram</li>
+                            <li>The WebApp was not launched with user information</li>
+                            <li>There's an issue with the Telegram WebApp initialization</li>
+                        </ul>
+                    </div>
+                `;
+            }
+        }
+        
+        // Display initData information
+        function displayInitDataInfo() {
+            const initdataInfoDiv = document.getElementById('initdata-info');
+            const tg = window.Telegram?.WebApp;
+            
+            if (tg) {
+                const hasInitData = !!tg.initData;
+                const initDataLength = tg.initData ? tg.initData.length : 0;
+                
+                initdataInfoDiv.innerHTML = `
+                    <p><strong>initData Available:</strong> ${hasInitData ? 'Yes' : 'No'}</p>
+                    <p><strong>initData Length:</strong> ${initDataLength} characters</p>
+                `;
+                
+                if (hasInitData) {
+                    initdataInfoDiv.innerHTML += `
+                        <div class="form-check form-switch mb-3">
+                            <input class="form-check-input" type="checkbox" id="show-init-data">
+                            <label class="form-check-label" for="show-init-data">Show raw initData (security risk)</label>
+                        </div>
+                        <div id="raw-init-data" style="display: none;">
+                            <p><strong>Raw initData:</strong></p>
+                            <pre>${tg.initData}</pre>
+                        </div>
+                    `;
+                    
+                    // Add event listener for the toggle
+                    setTimeout(() => {
+                        document.getElementById('show-init-data')?.addEventListener('change', function() {
+                            document.getElementById('raw-init-data').style.display = this.checked ? 'block' : 'none';
+                        });
+                    }, 100);
+                } else {
+                    initdataInfoDiv.innerHTML += `
+                        <div class="alert alert-warning">
+                            No initData available. This is required for secure authentication.
+                        </div>
+                    `;
+                }
+                
+                // Show initDataUnsafe
+                if (tg.initDataUnsafe) {
+                    initdataInfoDiv.innerHTML += `
+                        <p><strong>initDataUnsafe:</strong></p>
+                        <pre>${JSON.stringify(tg.initDataUnsafe, null, 2)}</pre>
+                    `;
+                }
+            } else {
+                initdataInfoDiv.innerHTML = `
+                    <div class="alert alert-warning">
+                        Telegram WebApp is not available.
+                    </div>
+                `;
+            }
+        }
+        
+        // Test API endpoints
+        async function testEndpoint(endpoint, method = 'POST') {
+            const authResultsDiv = document.getElementById('auth-results');
+            const tg = window.Telegram?.WebApp;
+            
+            // Add loading indicator
+            authResultsDiv.innerHTML += `<div id="loading-${endpoint.replace(/\//g, '-')}">Testing ${endpoint}... <div class="spinner-border spinner-border-sm" role="status"></div></div>`;
+            
+            try {
+                let response;
+                
+                if (method === 'POST' && endpoint === '/api/validate') {
+                    // Special handling for validate endpoint
+                    response = await fetch(endpoint, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: tg && tg.initData ? `initData=${encodeURIComponent(tg.initData)}` : 'initData='
+                    });
+                } else if (method === 'POST' && endpoint === '/api/sync') {
+                    // Special handling for sync endpoint
+                    const userId = getUserId();
+                    response = await fetch(endpoint, {
+                        method: 'POST',
+                        headers: { 
+                            'Content-Type': 'application/json',
+                            'Authorization': userId ? `Bearer ${userId}` : ''
+                        },
+                        body: JSON.stringify({ user_id: userId || '123456789' })
+                    });
+                } else {
+                    // GET requests with proper headers
+                    const userId = getUserId();
+                    const headers = { 
+                        'Content-Type': 'application/json' 
+                    };
+                    
+                    if (userId) {
+                        headers['Authorization'] = `Bearer ${userId}`;
+                    }
+                    
+                    // Add initData as a query parameter for GET requests
+                    let url = endpoint;
+                    if (method === 'GET' && tg && tg.initData) {
+                        url += `?initData=${encodeURIComponent(tg.initData)}`;
+                    }
+                    
+                    response = await fetch(url, { 
+                        method, 
+                        headers 
+                    });
+                }
+                
+                // Remove loading indicator
+                document.getElementById(`loading-${endpoint.replace(/\//g, '-')}`).remove();
+                
+                // Parse response
+                const contentType = response.headers.get('content-type');
+                let responseData;
+                
+                if (contentType && contentType.includes('application/json')) {
+                    responseData = await response.json();
+                } else {
+                    responseData = await response.text();
+                }
+                
+                // Display result
+                authResultsDiv.innerHTML += `
+                    <div class="mt-3 mb-3">
+                        <h5>${endpoint} (${response.status} ${response.statusText})</h5>
+                        <pre>${typeof responseData === 'string' ? responseData : JSON.stringify(responseData, null, 2)}</pre>
+                    </div>
+                `;
+            } catch (error) {
+                // Remove loading indicator
+                document.getElementById(`loading-${endpoint.replace(/\//g, '-')}`).remove();
+                
+                authResultsDiv.innerHTML += `
+                    <div class="mt-3 mb-3">
+                        <h5>${endpoint} (Error)</h5>
+                        <div class="alert alert-danger">${error.message}</div>
+                    </div>
+                `;
+            }
+        }
+        
+        // Get user ID from various sources
+        function getUserId() {
+            // Try local storage first
+            const storedUserId = localStorage.getItem('telegram_user_id');
+            if (storedUserId) return storedUserId;
+            
+            // Try Telegram WebApp
+            const tg = window.Telegram?.WebApp;
+            if (tg && tg.initDataUnsafe && tg.initDataUnsafe.user) {
+                return tg.initDataUnsafe.user.id;
+            }
+            
+            return null;
+        }
+        
+        // Show status message
+        function showStatus(message, type = 'success') {
+            const statusDiv = document.getElementById('status-message');
+            statusDiv.className = `alert alert-${type}`;
+            statusDiv.textContent = message;
+            statusDiv.style.display = 'block';
+            
+            // Auto hide after 5 seconds
+            setTimeout(() => {
+                statusDiv.style.display = 'none';
+            }, 5000);
+        }
+        
+        // Event listeners
+        document.addEventListener('DOMContentLoaded', () => {
+            // Display initial information
+            displayWebAppInfo();
+            displayUserInfo();
+            displayInitDataInfo();
+            
+            // Test buttons
+            document.getElementById('test-validate').addEventListener('click', () => {
+                document.getElementById('auth-results').innerHTML = '';
+                testEndpoint('/api/validate', 'POST');
+            });
+            
+            document.getElementById('test-tests').addEventListener('click', () => {
+                document.getElementById('auth-results').innerHTML = '';
+                testEndpoint('/api/tests', 'GET');
+            });
+            
+            document.getElementById('test-sync').addEventListener('click', () => {
+                document.getElementById('auth-results').innerHTML = '';
+                testEndpoint('/api/sync', 'POST');
+            });
+            
+            // Manual user ID
+            document.getElementById('set-user-id').addEventListener('click', () => {
+                const userId = document.getElementById('manual-user-id').value.trim();
+                if (userId) {
+                    localStorage.setItem('telegram_user_id', userId);
+                    localStorage.setItem('telegram_user_data', JSON.stringify({
+                        id: userId,
+                        first_name: 'Test User',
+                        username: `test_user_${userId}`
+                    }));
+                    showStatus(`User ID set to: ${userId}`);
+                } else {
+                    showStatus('Please enter a valid user ID', 'warning');
+                }
+            });
+            
+            // Clear storage
+            document.getElementById('clear-storage').addEventListener('click', () => {
+                localStorage.clear();
+                showStatus('Local storage cleared');
+            });
+            
+            // Refresh data
+            document.getElementById('refresh-data').addEventListener('click', () => {
+                displayWebAppInfo();
+                displayUserInfo();
+                displayInitDataInfo();
+                showStatus('Data refreshed');
+            });
+        });
+    </script>
+</body>
+</html>
