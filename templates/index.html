@@ -909,6 +909,11 @@
             try {
                 console.log('Initializing app...');
                 
+                // Show loading indicator
+                document.getElementById('loading').style.display = 'block';
+                document.getElementById('app').style.display = 'none';
+                document.getElementById('direct-access-message').style.display = 'none';
+                
                 // Check if we're in a Telegram WebApp
                 const isTelegramWebApp = window.Telegram && window.Telegram.WebApp;
                 
@@ -968,10 +973,10 @@
                                 renderTestsList();
                                 
                                 // Skip loadTests() since we already have them
-                                // Show the app
+                                // Show the app and go directly to tests list
                                 document.getElementById('loading').style.display = 'none';
                                 document.getElementById('app').style.display = 'block';
-                                showScreen('home');
+                                showScreen('home'); // Show tests list directly
                                 return;
                             }
                         } catch (validationError) {
@@ -1005,10 +1010,10 @@
                 // Load tests for the user
                 await loadTests();
                 
-                // Show the app
+                // Show the app and go directly to tests list
                 document.getElementById('loading').style.display = 'none';
                 document.getElementById('app').style.display = 'block';
-                showScreen('home');
+                showScreen('home'); // Show tests list directly instead of welcome page
                 
             } catch (error) {
                 console.error('Initialization error:', error);
