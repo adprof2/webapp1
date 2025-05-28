@@ -54,14 +54,35 @@ def validate_telegram_webapp(init_data):
         print(f"Error validating Telegram WebApp data: {e}")
         return False, None
 
-# Import TestStorage from the main bot
-import sys
-import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from storage import TestStorage
+# Simple in-memory storage for tests
+class SimpleTestStorage:
+    def __init__(self, storage_path="user_tests.json"):
+        self.storage_path = storage_path
+        self.tests = self._load_tests()
+    
+    def _load_tests(self):
+        if os.path.exists(self.storage_path):
+            try:
+                with open(self.storage_path, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except Exception as e:
+                print(f"Error loading tests: {e}")
+        return {}
+    
+    def _save_tests(self):
+        try:
+            with open(self.storage_path, 'w', encoding='utf-8') as f:
+                json.dump(self.tests, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"Error saving tests: {e}")
+    
+    def get_user_tests(self, user_id):
+        user_id_str = str(user_id)
+        user_tests = self.tests.get(user_id_str, [])
+        return [{**test} for test in user_tests]
 
-# Initialize the same test storage as the main bot
-test_storage = TestStorage()
+# Initialize test storage
+test_storage = SimpleTestStorage()
 
 # Function to sync user_tests.json files
 def sync_user_tests_files():
