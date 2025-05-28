@@ -761,6 +761,12 @@
         let timerInterval = null;
         let currentLanguage = 'en'; // Default language
         
+        // Defensive getter for userId
+        function getUserId() {
+            if (currentUser && currentUser.id) return currentUser.id;
+            return null;
+        }
+        
         // Language functions
         function initializeLanguage() {
             // Get language from URL parameter
@@ -860,9 +866,8 @@
                     throw new Error('Telegram WebApp is not available');
                 }
                 
-                // Initialize theme based on Telegram or system preference
+                // Initialize theme and language
                 initializeTheme();
-                // Initialize language based on URL parameter or Telegram settings
                 initializeLanguage();
                 
                 // Get the user from Telegram WebApp
@@ -876,14 +881,12 @@
                 } else {
                     // Fallback to default user if Telegram doesn't provide user data
                     currentUser = { id: 1477944238, username: 'default_user', first_name: 'Default' };
-                    console.log('Using default user:', currentUser);
+                    console.warn('Using default user:', currentUser);
                 }
 
                 // --- SESSION AUTHENTICATION FIX ---
-                // Always POST to /api/validate with initData to set backend session
                 let initData = tg.initData || '';
                 if (!initData) {
-                    // If not present, try to get from window.location.search (for dev)
                     const urlParams = new URLSearchParams(window.location.search);
                     initData = urlParams.get('initData') || '';
                 }
@@ -896,21 +899,20 @@
                     body: `initData=${encodeURIComponent(initData)}`
                 });
                 const validateData = await validateResp.json();
-                if (!validateData.success) {
+                if (!validateData.success || !validateData.user || !validateData.user.id) {
                     throw new Error(validateData.message || 'Failed to validate user.');
                 }
-                // Optionally update currentUser with backend-confirmed user
-                if (validateData.user && validateData.user.id) {
-                    currentUser = validateData.user;
-                }
+                currentUser = validateData.user;
                 // --- END SESSION AUTHENTICATION FIX ---
 
-                // Load user's tests (now safe, session is correct)
+                // Defensive: check currentUser
+                if (!currentUser || !currentUser.id) {
+                    throw new Error('User authentication failed. Please open the app from Telegram.');
+                }
+
                 await loadTests();
-                // Hide loading, show app
                 document.getElementById('loading').style.display = 'none';
                 document.getElementById('app').style.display = 'block';
-                // Show home screen
                 showScreen(homeScreen);
             } catch (error) {
                 console.error('Initialization error:', error);
@@ -1015,85 +1017,50 @@
         function initializeTheme() {
             console.log('Initializing theme...');
             const themeToggleBtn = document.getElementById('theme-toggle');
-            
-            if (!themeToggleBtn) {
-                console.error('Theme toggle button not found!');
-                return;
-            }
-            
-            // Get references to the icons
             const lightIcon = document.getElementById('light-icon');
             const darkIcon = document.getElementById('dark-icon');
-            
-            if (!lightIcon || !darkIcon) {
-                console.error('Theme icons not found!');
+            if (!themeToggleBtn || !lightIcon || !darkIcon) {
+                console.error('Theme toggle or icons not found!');
                 return;
             }
-            
-            const prefersDarkScheme = window.matchMedia('(prefers-color-scheme: dark)').matches;
-            
-            // Check if Telegram has a color scheme preference
-            let initialTheme = 'light';
-            if (window.Telegram && window.Telegram.WebApp) {
-                const tg = window.Telegram.WebApp;
-                if (tg.colorScheme === 'dark') {
+
+            // Prefer saved theme
+            let savedTheme = localStorage.getItem('theme');
+            let initialTheme = savedTheme;
+            if (!initialTheme) {
+                // If no saved theme, use Telegram or system
+                if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.colorScheme === 'dark') {
                     initialTheme = 'dark';
+                } else if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+                    initialTheme = 'dark';
+                } else {
+                    initialTheme = 'light';
                 }
-            } else if (prefersDarkScheme) {
-                initialTheme = 'dark';
             }
-            
-            console.log('Initial theme:', initialTheme);
-            
-            // Set initial theme
-            if (initialTheme === 'dark') {
+            applyTheme(initialTheme);
+
+            // Theme toggle event
+            themeToggleBtn.addEventListener('click', () => {
+                let currentTheme = document.body.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+                let newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+                localStorage.setItem('theme', newTheme);
+                applyTheme(newTheme);
+            });
+        }
+
+        function applyTheme(theme) {
+            const lightIcon = document.getElementById('light-icon');
+            const darkIcon = document.getElementById('dark-icon');
+            if (theme === 'dark') {
                 document.body.setAttribute('data-theme', 'dark');
-                lightIcon.style.display = 'none';
-                darkIcon.style.display = 'block';
+                if (lightIcon) lightIcon.style.display = 'none';
+                if (darkIcon) darkIcon.style.display = 'block';
             } else {
                 document.body.removeAttribute('data-theme');
-                lightIcon.style.display = 'block';
-                darkIcon.style.display = 'none';
+                if (lightIcon) lightIcon.style.display = 'block';
+                if (darkIcon) darkIcon.style.display = 'none';
             }
-            
-            // Add event listener to theme toggle button
-            themeToggleBtn.addEventListener('click', () => {
-                console.log('Theme toggle clicked');
-                const currentTheme = document.body.getAttribute('data-theme');
-                
-                if (currentTheme === 'dark') {
-                    // Switch to light theme
-                    document.body.removeAttribute('data-theme');
-                    lightIcon.style.display = 'block';
-                    darkIcon.style.display = 'none';
-                    localStorage.setItem('theme', 'light');
-                    console.log('Switched to light theme');
-                } else {
-                    // Switch to dark theme
-                    document.body.setAttribute('data-theme', 'dark');
-                    lightIcon.style.display = 'none';
-                    darkIcon.style.display = 'block';
-                    localStorage.setItem('theme', 'dark');
-                    console.log('Switched to dark theme');
-                }
-            });
-            
-            // Check for saved theme preference in localStorage
-            const savedTheme = localStorage.getItem('theme');
-            if (savedTheme) {
-                console.log('Found saved theme preference:', savedTheme);
-                if (savedTheme === 'dark') {
-                    document.body.setAttribute('data-theme', 'dark');
-                    lightIcon.style.display = 'none';
-                    darkIcon.style.display = 'block';
-                } else {
-                    document.body.removeAttribute('data-theme');
-                    lightIcon.style.display = 'block';
-                    darkIcon.style.display = 'none';
-                }
-            }
-            
-            console.log('Theme initialization complete');
+            console.log('Theme set to:', theme);
         }
 
         // Render tests list with enhanced UI
