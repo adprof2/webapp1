@@ -452,14 +452,20 @@
         <h2 id="direct-access-title">MasterQuiz Telegram App</h2>
         <div class="alert alert-info">
             <p><strong id="direct-access-message-text">This web app is designed to work within Telegram only.</strong></p>
-            <p id="direct-access-instructions">To use this app:</p>
-            <ol class="direct-access-steps">
-                <li id="direct-access-step1">Open the MasterQuiz bot in Telegram</li>
-                <li id="direct-access-step2">Click on the "📱 Web Quiz App" button in the menu</li>
-                <li id="direct-access-step3">Tap the "Open Quiz App" button that appears</li>
-            </ol>
+            <p>To use the app:</p>
+            <ul>
+                <li>Open the MasterQuiz bot in Telegram</li>
+                <li>Click on the "🧩 Web Quiz App" button in the menu</li>
+                <li>Tap the "Open Quiz App" button that appears</li>
+            </ul>
         </div>
-        <p id="direct-access-developer">If you're a developer testing this app, you need to simulate the Telegram WebApp environment.</p>
+        <div id="test-mode-section" style="margin-top: 20px;">
+            <div class="alert alert-warning">
+                <p><strong>Developer Testing Mode</strong></p>
+                <p>Would you like to continue in test mode with a sample user?</p>
+                <button id="continue-test-mode" class="btn btn-primary">Continue in Test Mode</button>
+            </div>
+        </div>
     </div>
 
     <div id="loading" class="loading">
@@ -904,70 +910,93 @@
                 console.log('Initializing app...');
                 
                 // Check if we're in a Telegram WebApp
-                if (!window.Telegram || !window.Telegram.WebApp) {
+                const isTelegramWebApp = window.Telegram && window.Telegram.WebApp;
+                
+                // For direct browser access (development/testing)
+                const allowDirectAccess = true; // Set to true to allow direct browser access
+                
+                if (!isTelegramWebApp && !allowDirectAccess) {
                     throw new Error('This app can only be used within Telegram');
                 }
-                
-                const tg = window.Telegram.WebApp;
-                console.log('Telegram WebApp version:', tg.version);
-                
-                // Expand the WebApp to full view
-                tg.expand();
                 
                 // Initialize theme and language
                 initializeTheme();
                 initializeLanguage();
                 
-                // Get user data from Telegram WebApp
-                if (tg.initDataUnsafe && tg.initDataUnsafe.user) {
-                    // We have user data directly from Telegram
-                    userData = tg.initDataUnsafe.user;
-                    userId = userData.id;
-                    console.log('Got user from Telegram WebApp:', userData);
-                } else if (tg.initData) {
-                    // We have initData that needs to be validated
-                    console.log('Validating initData with server...');
+                if (isTelegramWebApp) {
+                    // We're in Telegram, use Telegram authentication
+                    const tg = window.Telegram.WebApp;
+                    console.log('Telegram WebApp version:', tg.version);
                     
-                    try {
-                        const validateResp = await fetch('/api/validate', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                            body: `initData=${encodeURIComponent(tg.initData)}`
-                        });
-                        
-                        if (!validateResp.ok) {
-                            throw new Error(`Validation failed: ${validateResp.status}`);
-                        }
-                        
-                        const validateData = await validateResp.json();
-                        
-                        if (!validateData.success || !validateData.user || !validateData.user.id) {
-                            throw new Error(validateData.message || 'Failed to validate user');
-                        }
-                        
-                        userData = validateData.user;
+                    // Expand the WebApp to full view
+                    tg.expand();
+                    
+                    // Get user data from Telegram WebApp
+                    if (tg.initDataUnsafe && tg.initDataUnsafe.user) {
+                        // We have user data directly from Telegram
+                        userData = tg.initDataUnsafe.user;
                         userId = userData.id;
-                        console.log('User validated successfully:', userData);
+                        console.log('Got user from Telegram WebApp:', userData);
+                    } else if (tg.initData) {
+                        // We have initData that needs to be validated
+                        console.log('Validating initData with server...');
                         
-                        // If the validation returned tests, use them directly
-                        if (validateData.tests && Array.isArray(validateData.tests)) {
-                            tests = validateData.tests;
-                            renderTestsList();
+                        try {
+                            const validateResp = await fetch('/api/validate', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                                body: `initData=${encodeURIComponent(tg.initData)}`
+                            });
                             
-                            // Skip loadTests() since we already have them
-                            // Show the app
-                            document.getElementById('loading').style.display = 'none';
-                            document.getElementById('app').style.display = 'block';
-                            showScreen('home');
-                            return;
+                            if (!validateResp.ok) {
+                                throw new Error(`Validation failed: ${validateResp.status}`);
+                            }
+                            
+                            const validateData = await validateResp.json();
+                            
+                            if (!validateData.success || !validateData.user || !validateData.user.id) {
+                                throw new Error(validateData.message || 'Failed to validate user');
+                            }
+                            
+                            userData = validateData.user;
+                            userId = userData.id;
+                            console.log('User validated successfully:', userData);
+                            
+                            // If the validation returned tests, use them directly
+                            if (validateData.tests && Array.isArray(validateData.tests)) {
+                                tests = validateData.tests;
+                                renderTestsList();
+                                
+                                // Skip loadTests() since we already have them
+                                // Show the app
+                                document.getElementById('loading').style.display = 'none';
+                                document.getElementById('app').style.display = 'block';
+                                showScreen('home');
+                                return;
+                            }
+                        } catch (validationError) {
+                            console.error('Error during validation:', validationError);
+                            throw validationError;
                         }
-                    } catch (validationError) {
-                        console.error('Error during validation:', validationError);
-                        throw validationError;
+                    } else {
+                        // No user data available from Telegram
+                        console.warn('No user data available from Telegram');
                     }
                 } else {
-                    // No user data available
-                    throw new Error('No user data available. Please open the app from Telegram.');
+                    // We're not in Telegram, use test user for direct browser access
+                    console.warn('Using test user for direct browser access');
+                    userData = { 
+                        id: 123456789, 
+                        first_name: 'Test User',
+                        username: 'test_user',
+                        is_test_user: true
+                    };
+                    userId = userData.id;
+                }
+                
+                // If we still don't have a user ID, show error
+                if (!userId) {
+                    throw new Error('No user ID available. Please open the app from Telegram.');
                 }
                 
                 // Update UI with user data
@@ -1794,6 +1823,30 @@
             
             document.getElementById('start-configured-test-btn').addEventListener('click', () => {
                 startConfiguredTest();
+            });
+            
+            // Continue in Test Mode button
+            document.getElementById('continue-test-mode')?.addEventListener('click', function() {
+                console.log('Continuing in test mode');
+                // Set up test user
+                userData = {
+                    id: 123456789,
+                    first_name: 'Test User',
+                    username: 'test_user',
+                    is_test_user: true
+                };
+                userId = userData.id;
+                
+                // Hide the direct access message
+                document.getElementById('direct-access-message').style.display = 'none';
+                
+                // Show the app
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('app').style.display = 'block';
+                
+                // Load tests and show home screen
+                loadTests();
+                showScreen('home');
             });
         }
         
